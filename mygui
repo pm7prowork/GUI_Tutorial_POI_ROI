@@ -1,0 +1,164 @@
+import sys
+from PyQt4 import QtCore, QtGui, uic
+import Valuehandle
+import cv2
+from PyQt4.QtGui import QFileDialog, QImage
+import numpy as np
+
+Ui_MainWindowPOI, QtBaseClassPOI = uic.loadUiType("POI.ui")
+Ui_MainWindowROI, QtBaseClassROI = uic.loadUiType("ROI.ui")
+
+class selectFeature(QtGui.QMainWindow, Ui_MainWindowPOI):
+    def __init__(self):
+
+        helpText = ["move trackbar to get an idea of good features",
+                    "press q for save and quit",
+                    "press r for reset current selection"]
+
+        QtGui.QMainWindow.__init__(self)
+        Ui_MainWindowPOI.__init__(self)
+        self.setupUi(self)
+        self.image = cv2.imread("IMG_3797.jpg")
+        self.image = cv2.cvtColor(self.image, cv2.COLOR_RGB2BGR)
+        index = 0
+        for t in helpText:
+            cv2.putText(self.image, t, (5, 10 + 12 * index), cv2.FONT_HERSHEY_PLAIN, 0.7, thickness=1, color=(255, 255, 255),
+                        lineType=cv2.LINE_AA)
+            index += 1
+        self.showVideoFrame(self.image)
+        self.comboBox.currentIndexChanged.connect(self.selectiontracker)
+
+        self.horizontalSlider.valueChanged.connect(self.horizontalSlider_zoom_valuechange)
+
+    def selectiontracker(self, i):
+
+        Valuehandle.setfeat_dct(i)
+
+    def horizontalSlider_zoom_valuechange(self):
+
+        Valuehandle.sethorizontalSlider_zoom_value(self.horizontalSlider.value())
+        global corners_found
+        corners_found = np.zeros((Valuehandle.gethorizontalSlider_zoom_value(),2), dtype=np.float)
+
+        self.image2 = self.image.copy()
+        gray = cv2.cvtColor(self.image2, cv2.COLOR_RGB2GRAY)
+
+        # Good_Features_To_Track
+        if Valuehandle.getfeat_dct()[0]:
+            corners = cv2.goodFeaturesToTrack(gray, Valuehandle.gethorizontalSlider_zoom_value(), 0.01, 10)
+            corners = np.int0(corners)
+
+            j = 0
+            for i in corners:
+                x, y = i.ravel()
+                corners_found[j, :] = x, y
+                j = j+1
+                cv2.circle(self.image2, (x, y), 2, (0, 255, 0), -1)
+
+        # SURF
+        if Valuehandle.getfeat_dct()[1]:
+            surf = cv2.xfeatures2d.SURF_create(400)
+            corners = surf.detect(gray, None)
+
+            j = 0
+            for i in corners[:Valuehandle.gethorizontalSlider_zoom_value()]:
+                x, y = i.pt
+                corners_found[j, :] = x, y
+                j = j + 1
+                cv2.circle(self.image2, (int(x), int(y)), 2, (0, 255, 0), -1)
+
+        window.showVideoFrame(self.image2)
+
+    def mousePressEvent(self, QMouseEvent):
+
+        POI1 = [QMouseEvent.x()-self.widget.x(), QMouseEvent.y()-self.widget.y()]
+        POI = self.find_nearest(corners_found, POI1)
+        Valuehandle.setPOI(POI)
+        image3 = self.image2.copy()
+        cv2.circle(image3, (int(Valuehandle.getPOI()[0]), int(Valuehandle.getPOI()[1])), 4, (0, 0, 255), thickness=2)
+        cv2.putText(image3, 'Selected POI: ' + str(POI), (5, 48),
+                    cv2.FONT_HERSHEY_PLAIN, 1.0, thickness=1, color=(255, 255, 255), lineType=cv2.LINE_AA)
+
+        window.showVideoFrame(image3)
+        # print POI
+
+    def find_nearest(self, points, coord):
+
+        dists = [(pow(point[0] - coord[0], 2) + pow(point[1] - coord[1], 2), point)
+                 for point in points]  # list of (dist, point) tuples
+        nearest = min(dists)
+        return nearest[1]
+
+    # Show video frame
+    def showVideoFrame(self, img):
+
+        height, width, _ = img.shape
+        bytesPerLine = 3 * width
+        qImg = QtGui.QImage(img.data, width, height, bytesPerLine, QImage.Format_RGB888)
+        qPix = QtGui.QPixmap.fromImage(qImg)
+        self.label.setPixmap(qPix)
+
+    def keyPressEvent(self, event):
+
+        # Did the user press the Escape key?
+        if event.key() == QtCore.Qt.Key_Escape or event.key() == QtCore.Qt.Key_Q:
+            self.close()
+
+class selectROI(QtGui.QMainWindow, Ui_MainWindowROI):
+
+    def __init__(self):
+
+        QtGui.QMainWindow.__init__(self)
+        Ui_MainWindowROI.__init__(self)
+        self.setupUi(self)
+        self.image = cv2.imread("IMG_3797.jpg")
+        self.image = cv2.cvtColor(self.image, cv2.COLOR_RGB2BGR)
+        self.showVideoFrame(self.image)
+
+    def mousePressEvent(self, QMouseEvent):
+
+        global refPt, image3
+        refPt = np.zeros((2, 2))
+        POI = [QMouseEvent.x()-self.widget.x(), QMouseEvent.y()-self.widget.y()]
+        refPt[0][0], refPt[0][1] = POI[0], POI[1]
+        image3 = self.image.copy()
+        window.showVideoFrame(image3)
+
+    def mouseReleaseEvent(self, QMouseEvent):
+
+        refPt[1][0], refPt[1][1] = QMouseEvent.x()-self.widget.x(), QMouseEvent.y()-self.widget.y()
+
+        cv2.rectangle(image3, (int(refPt[0][0]), int(refPt[0][1])), (int(refPt[1][0]), int(refPt[1][1])), (255, 0, 0), 2)
+
+        cv2.putText(image3, 'Selected ROI: TLC = ' + str(refPt[0]) + ' and BRC = ' + str(refPt[1]), (15, 15),
+                    cv2.FONT_HERSHEY_PLAIN, 1.0, thickness=1, color=(255, 255, 255), lineType=cv2.LINE_AA)
+
+        Valuehandle.setROI(refPt)
+        window.showVideoFrame(image3)
+
+    # Show video frame
+    def showVideoFrame(self, img):
+
+        height, width, _ = img.shape
+        bytesPerLine = 3 * width
+        qImg = QtGui.QImage(img.data, width, height, bytesPerLine, QImage.Format_RGB888)
+        qPix = QtGui.QPixmap.fromImage(qImg)
+        self.label_image_roi.setPixmap(qPix)
+
+    def keyPressEvent(self, event):
+
+        # Did the user press the Escape key?
+        if event.key() == QtCore.Qt.Key_Escape or event.key() == QtCore.Qt.Key_Q:
+            self.close()
+
+if __name__ == "__main__":
+
+    app = QtGui.QApplication(sys.argv)
+    POI = False
+    if POI:
+        window = selectFeature()
+        window.show()
+    else:
+        window = selectROI()
+        window.show()
+    sys.exit(app.exec_())
